@@ -29,10 +29,13 @@
 
 #include <wolfssl/wolfcrypt/types.h>
 #include <wolfssl/wolfcrypt/random.h>
-#include <wolfssl/wolfcrypt/sha3.h>
+// #include <wolfssl/wolfcrypt/sha3.h>
 #include <wolfssl/wolfcrypt/mlkem.h>
 
 #ifdef WOLFSSL_HAVE_MLKEM
+/* Ascon-only: SHA3/SHAKE 관련 헤더 제거, ascon.h만 포함 */
+#include <wolfssl/wolfcrypt/ascon.h>
+
 
 #ifdef WOLFSSL_KYBER_NO_MAKE_KEY
     #define WOLFSSL_MLKEM_NO_MAKE_KEY
@@ -76,7 +79,7 @@ enum {
 
 
 /* SHAKE128 rate. */
-#define XOF_BLOCK_SIZE      168
+//#define XOF_BLOCK_SIZE      168
 
 /* Modulus of co-efficients of polynomial. */
 #define MLKEM_Q             3329
@@ -103,10 +106,14 @@ enum {
 
 
 /* The data type of the hash function. */
-#define MLKEM_HASH_T    wc_Sha3
+//#define MLKEM_HASH_T    wc_Sha3
 
 /* The data type of the pseudo-random function. */
-#define MLKEM_PRF_T     wc_Shake
+//#define MLKEM_PRF_T     wc_Shake
+
+/* Ascon-only: 암호화 프리미티브 타입을 Ascon 구조체로 고정 */
+#define MLKEM_HASH_T    wc_AsconHash256
+#define MLKEM_PRF_T     wc_AsconXof
 
 /* ML-KEM key. */
 struct MlKemKey {
@@ -192,9 +199,9 @@ int mlkem_hash_new(MLKEM_HASH_T* hash, void* heap, int devId);
 WOLFSSL_LOCAL
 void mlkem_hash_free(MLKEM_HASH_T* hash);
 WOLFSSL_LOCAL
-int mlkem_hash256(wc_Sha3* hash, const byte* data, word32 dataLen, byte* out);
+int mlkem_hash256(wc_AsconHash256* hash, const byte* data, word32 dataLen, byte* out);
 WOLFSSL_LOCAL
-int mlkem_hash512(wc_Sha3* hash, const byte* data1, word32 data1Len,
+int mlkem_hash512(wc_AsconHash256* hash, const byte* data1, word32 data1Len,
     const byte* data2, word32 data2Len, byte* out);
 
 WOLFSSL_LOCAL
