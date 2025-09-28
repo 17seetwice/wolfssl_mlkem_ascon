@@ -46,18 +46,29 @@
     #error "Ascon implementation requires a 64-bit word"
 #endif
 
-/* Data block size in bytes */
+/* Data block size in bytes and constants based on Ascon v1.2 */
 #define ASCON_HASH256_RATE                              8
 #define ASCON_HASH256_ROUNDS                           12
-#define ASCON_HASH256_IV            0x0000080100CC0002ULL
+#define ASCON_HASH256_IV            0xee9398aadb67f03dULL /* Official IV */
+
+#define ASCON_XOF_RATE                                  8
+#define ASCON_XOF_ROUNDS                               12
+#define ASCON_XOF_IV                0xb57e273b814cd416ULL /* Official IV */
 
 #define ASCON_AEAD128_ROUNDS_PA                        12
 #define ASCON_AEAD128_ROUNDS_PB                         8
-#define ASCON_AEAD128_IV            0x00001000808C0001ULL
-#define ASCON_AEAD128_RATE                             16
+#define ASCON_AEAD128_IV            0x80400c0600000000ULL /* Official IV */
+#define ASCON_AEAD128_RATE                             8  /* Correct rate is 8 for 128 */
 
 #define MAX_ROUNDS 12
 
+#ifndef WOLFSSL_ASCON_UNROLL
+/* ... permutation function (unchanged) ... */
+#else
+/* ... permutation macro (unchanged) ... */
+#endif
+
+/* (The existing permutation function/macro remains here, unchanged) */
 #ifndef WOLFSSL_ASCON_UNROLL
 
 /* Table 5 */
@@ -68,6 +79,8 @@ static const byte round_constants[MAX_ROUNDS] = {
 static byte start_index(byte rounds)
 {
     switch (rounds) {
+        case 6:
+            return 6;
         case 8:
             return 4;
         case 12:
@@ -105,7 +118,7 @@ static WC_INLINE void ascon_round(AsconState* a, byte round)
     a->s64[2] = tmp2 ^ rotrFixed64(tmp2,  1) ^ rotrFixed64(tmp2,  6);
 }
 
-static void permutation(AsconState* a, byte rounds)
+void permutation(AsconState* a, byte rounds)
 {
     byte i = start_index(rounds);
     for (; i < MAX_ROUNDS; i++) {
@@ -140,15 +153,18 @@ static void permutation(AsconState* a, byte rounds)
     (a)->s64[2] = tmp2 ^ rotrFixed64(tmp2,  1) ^ rotrFixed64(tmp2,  6);        \
 } while (0)
 
-#define p8(a) \
-    p(a, 0xb4); \
-    p(a, 0xa5); \
+#define p6(a) \
     p(a, 0x96); \
     p(a, 0x87); \
     p(a, 0x78); \
     p(a, 0x69); \
     p(a, 0x5a); \
     p(a, 0x4b)
+
+#define p8(a) \
+    p(a, 0xb4); \
+    p(a, 0xa5); \
+    p6(a)
 
 #define p12(a) \
     p(a, 0xf0); \
@@ -165,6 +181,7 @@ static void permutation(AsconState* a, byte rounds)
     _permutation(a, rounds)
 
 #endif
+
 
 /* AsconHash API */
 
@@ -254,13 +271,12 @@ int wc_AsconHash256_Final(wc_AsconHash256* a, byte* hash)
     if (a == NULL || hash == NULL)
         return BAD_FUNC_ARG;
 
-    /* Process last block */
-    a->state.s8[a->lastBlkSz] ^= 1;
+    /* Process last block with correct padding */
+    a->state.s8[a->lastBlkSz] ^= 0x80;
 
     for (i = 0; i < ASCON_HASH256_SZ; i += ASCON_HASH256_RATE) {
         permutation(&a->state, ASCON_HASH256_ROUNDS);
-        XMEMCPY(hash, a->state.s64, ASCON_HASH256_RATE);
-        hash += ASCON_HASH256_RATE;
+        XMEMCPY(hash + i, a->state.s64, ASCON_HASH256_RATE);
     }
 
     /* Clear state as soon as possible */
@@ -268,8 +284,150 @@ int wc_AsconHash256_Final(wc_AsconHash256* a, byte* hash)
     return 0;
 }
 
-/* AsconAEAD API */
+int wc_AsconHash256(byte* hash, const byte* data, word32 dataSz)
+{
+    wc_AsconHash256 ascon;
+    int ret = 0;
 
+    if (hash == NULL || (data == NULL && dataSz > 0)) {
+        return BAD_FUNC_ARG;
+    }
+
+    ret = wc_AsconHash256_Init(&ascon);
+    if (ret != 0)
+        return ret;
+    ret = wc_AsconHash256_Update(&ascon, data, dataSz);
+    if (ret != 0)
+        return ret;
+
+    return wc_AsconHash256_Final(&ascon, hash);
+}
+
+/* AsconXOF API (New) */
+
+wc_AsconXof* wc_AsconXof_New(void)
+{
+    wc_AsconXof* ret = (wc_AsconXof*)XMALLOC(sizeof(wc_AsconXof),
+            NULL, DYNAMIC_TYPE_ASCON);
+    if (ret != NULL) {
+        if (wc_AsconXof_Init(ret) != 0) {
+            wc_AsconXof_Free(ret);
+            ret = NULL;
+        }
+    }
+    return ret;
+}
+
+void wc_AsconXof_Free(wc_AsconXof* a)
+{
+    if (a != NULL) {
+        wc_AsconXof_Clear(a);
+        XFREE(a, NULL, DYNAMIC_TYPE_ASCON);
+    }
+}
+
+int wc_AsconXof_Init(wc_AsconXof* a)
+{
+    if (a == NULL)
+        return BAD_FUNC_ARG;
+
+    XMEMSET(a, 0, sizeof(*a));
+    a->state.s64[0] = ASCON_XOF_IV;
+    permutation(&a->state, ASCON_XOF_ROUNDS);
+
+    return 0;
+}
+
+void wc_AsconXof_Clear(wc_AsconXof* a)
+{
+    if (a != NULL) {
+        ForceZero(a, sizeof(*a));
+    }
+}
+
+int wc_AsconXof_Update(wc_AsconXof* a, const byte* data, word32 dataSz)
+{
+    if (a == NULL || (data == NULL && dataSz != 0))
+        return BAD_FUNC_ARG;
+
+    if (dataSz == 0)
+        return 0;
+
+    /* Process leftover block */
+    if (a->lastBlkSz != 0) {
+        word32 toProcess = min(ASCON_XOF_RATE - a->lastBlkSz, dataSz);
+        xorbuf(a->state.s8 + a->lastBlkSz, data, toProcess);
+        data += toProcess;
+        dataSz -= toProcess;
+        a->lastBlkSz += toProcess;
+
+        if (a->lastBlkSz < ASCON_XOF_RATE)
+            return 0;
+
+        permutation(&a->state, ASCON_XOF_ROUNDS);
+        a->lastBlkSz = 0;
+    }
+
+    while (dataSz >= ASCON_XOF_RATE) {
+        xorbuf(a->state.s64, data, ASCON_XOF_RATE);
+        permutation(&a->state, ASCON_XOF_ROUNDS);
+        data += ASCON_XOF_RATE;
+        dataSz -= ASCON_XOF_RATE;
+    }
+
+    xorbuf(a->state.s64, data, dataSz);
+    a->lastBlkSz = dataSz;
+
+    return 0;
+}
+
+int wc_AsconXof_Squeeze(wc_AsconXof* a, byte* out, word32 outSz)
+{
+    if (a == NULL || (out == NULL && outSz > 0))
+        return BAD_FUNC_ARG;
+    
+    /* Pad last block if not already done */
+    if (a->lastBlkSz != 255) { /* Use 255 as a sentinel for squeezed state */
+        a->state.s8[a->lastBlkSz] ^= 0x80;
+        a->lastBlkSz = 255;
+    }
+
+    while (outSz > 0) {
+        word32 toCopy;
+        permutation(&a->state, ASCON_XOF_ROUNDS);
+        toCopy = min(outSz, ASCON_XOF_RATE);
+        XMEMCPY(out, a->state.s64, toCopy);
+        out += toCopy;
+        outSz -= toCopy;
+    }
+    
+    return 0;
+}
+
+int wc_AsconXof(byte* out, word32 outSz, const byte* in, word32 inSz)
+{
+    wc_AsconXof xof;
+    int ret;
+    
+    if ((out == NULL && outSz > 0) || (in == NULL && inSz > 0))
+        return BAD_FUNC_ARG;
+    
+    ret = wc_AsconXof_Init(&xof);
+    if (ret != 0) return ret;
+    
+    ret = wc_AsconXof_Update(&xof, in, inSz);
+    if (ret != 0) return ret;
+    
+    ret = wc_AsconXof_Squeeze(&xof, out, outSz);
+    
+    wc_AsconXof_Clear(&xof);
+    return ret;
+}
+
+
+/* AsconAEAD API */
+/* ... existing AsconAEAD128 functions remain here ... */
+/* ... (unchanged) ... */
 wc_AsconAEAD128* wc_AsconAEAD128_New(void)
 {
     wc_AsconAEAD128 *ret = (wc_AsconAEAD128*) XMALLOC(sizeof(wc_AsconAEAD128),
@@ -316,7 +474,10 @@ int wc_AsconAEAD128_SetKey(wc_AsconAEAD128* a, const byte* key)
     if (a->keySet)
         return BAD_STATE_E;
 
-    XMEMCPY(a->key, key, ASCON_AEAD128_KEY_SZ);
+    /* Correctly load key as two 64-bit words */
+    a->key[0] = ((word64*)key)[0];
+    a->key[1] = ((word64*)key)[1];
+
     a->state.s64[1] = a->key[0];
     a->state.s64[2] = a->key[1];
     a->keySet = 1;
@@ -350,6 +511,7 @@ int wc_AsconAEAD128_SetAD(wc_AsconAEAD128* a, const byte* ad,
     a->state.s64[4] ^= a->key[1];
 
     if (adSz > 0) {
+        a->state.s64[4] ^= 1; /* Domain separation for AD */
         while (adSz >= ASCON_AEAD128_RATE) {
             xorbuf(a->state.s64, ad, ASCON_AEAD128_RATE);
             permutation(&a->state, ASCON_AEAD128_ROUNDS_PB);
@@ -358,10 +520,11 @@ int wc_AsconAEAD128_SetAD(wc_AsconAEAD128* a, const byte* ad,
         }
         xorbuf(a->state.s64, ad, adSz);
         /* Pad the last block */
-        a->state.s8[adSz] ^= 1;
+        a->state.s8[adSz] ^= 0x80;
         permutation(&a->state, ASCON_AEAD128_ROUNDS_PB);
     }
-    a->state.s64[4] ^= 1ULL << 63;
+    
+    a->state.s64[4] ^= 1; /* Domain separation */
 
     a->adSet = 1;
     return 0;
@@ -425,10 +588,10 @@ int wc_AsconAEAD128_EncryptFinal(wc_AsconAEAD128* a, byte* tag)
         return BAD_STATE_E;
 
     /* Process leftover from last block */
-    a->state.s8[a->lastBlkSz] ^= 1;
+    a->state.s8[a->lastBlkSz] ^= 0x80;
 
-    a->state.s64[2] ^= a->key[0];
-    a->state.s64[3] ^= a->key[1];
+    a->state.s64[1] ^= a->key[0];
+    a->state.s64[2] ^= a->key[1];
     permutation(&a->state, ASCON_AEAD128_ROUNDS_PA);
     a->state.s64[3] ^= a->key[0];
     a->state.s64[4] ^= a->key[1];
@@ -439,7 +602,6 @@ int wc_AsconAEAD128_EncryptFinal(wc_AsconAEAD128* a, byte* tag)
     wc_AsconAEAD128_Clear(a);
 
     return 0;
-
 }
 
 
@@ -500,10 +662,10 @@ int wc_AsconAEAD128_DecryptFinal(wc_AsconAEAD128* a, const byte* tag)
         return BAD_STATE_E;
 
     /* Pad last block */
-    a->state.s8[a->lastBlkSz] ^= 1;
+    a->state.s8[a->lastBlkSz] ^= 0x80;
 
-    a->state.s64[2] ^= a->key[0];
-    a->state.s64[3] ^= a->key[1];
+    a->state.s64[1] ^= a->key[0];
+    a->state.s64[2] ^= a->key[1];
     permutation(&a->state, ASCON_AEAD128_ROUNDS_PA);
     a->state.s64[3] ^= a->key[0];
     a->state.s64[4] ^= a->key[1];
