@@ -35,7 +35,7 @@
  *   Has a small performance trade-off.
  *   Only usable with C implementation.
  *
- * WOLFSSL_MLKEM_ENCAPSULATE_SMALL_MEM                              Default: OFF
+ * WOLFSSL_MLKEM_ENCAPSUL ATE_SMALL_MEM                              Default: OFF
  *   Uses less dynamic memory to perform encapsulation.
  *   Affects decapsulation too as encapsulation called.
  *   Has a small performance trade-off.
@@ -116,7 +116,7 @@
         (defined(WOLFSSL_ARMASM) && defined(__aarch64__))
     #define MLKEM_KDF               mlkem_kdf
 #else
-    #define MLKEM_KDF               wc_Shake256Hash
+    #define MLKEM_KDF               wc_AsconXof
 #endif
 
 /******************************************************************************/
@@ -234,7 +234,7 @@ int wc_MlKemKey_Init(MlKemKey* key, int type, void* heap, int devId)
         case KYBER768:
         #ifndef WOLFSSL_KYBER768
             /* Code not compiled in for Kyber-768. */
-            ret = NOT_COMPILED_IN;
+            ret = NOT_COMPILEDㅁ_IN;
         #endif
             break;
         case KYBER1024:
