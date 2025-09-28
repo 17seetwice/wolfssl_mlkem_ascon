@@ -50,6 +50,13 @@ typedef struct wc_AsconHash256 {
     byte lastBlkSz;
 } wc_AsconHash256;
 
+/* New struct for Ascon-XOF */
+typedef struct wc_AsconXof {
+    AsconState state;
+    byte lastBlkSz;
+} wc_AsconXof;
+
+
 enum {
     ASCON_AEAD128_NOTSET  = 0,
     ASCON_AEAD128_ENCRYPT = 1,
@@ -78,13 +85,30 @@ WOLFSSL_API void wc_AsconHash256_Clear(wc_AsconHash256* a);
 WOLFSSL_API int wc_AsconHash256_Update(wc_AsconHash256* a, const byte* data,
                                        word32 dataSz);
 WOLFSSL_API int wc_AsconHash256_Final(wc_AsconHash256* a, byte* hash);
+/* One-shot AsconHash function */
+WOLFSSL_API int wc_AsconHash256(byte* hash, const byte* data, word32 dataSz);
+
+
+/* AsconXOF API (New) */
+
+WOLFSSL_API wc_AsconXof* wc_AsconXof_New(void);
+WOLFSSL_API void wc_AsconXof_Free(wc_AsconXof* a);
+WOLFSSL_API int wc_AsconXof_Init(wc_AsconXof* a);
+WOLFSSL_API void wc_AsconXof_Clear(wc_AsconXof* a);
+WOLFSSL_API int wc_AsconXof_Update(wc_AsconXof* a, const byte* data,
+                                   word32 dataSz);
+WOLFSSL_API int wc_AsconXof_Squeeze(wc_AsconXof* a, byte* out, word32 outSz);
+/* One-shot AsconXOF function */
+WOLFSSL_API int wc_AsconXof(byte* out, word32 outSz, const byte* in,
+                            word32 inSz);
+
+
+/* AsconAEAD API */
 
 WOLFSSL_API wc_AsconAEAD128* wc_AsconAEAD128_New(void);
 WOLFSSL_API void wc_AsconAEAD128_Free(wc_AsconAEAD128* a);
 WOLFSSL_API int wc_AsconAEAD128_Init(wc_AsconAEAD128* a);
 WOLFSSL_API void wc_AsconAEAD128_Clear(wc_AsconAEAD128* a);
-
-/* AsconAEAD API */
 
 WOLFSSL_API int wc_AsconAEAD128_SetKey(wc_AsconAEAD128* a, const byte* key);
 WOLFSSL_API int wc_AsconAEAD128_SetNonce(wc_AsconAEAD128* a, const byte* nonce);
